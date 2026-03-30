@@ -9,18 +9,18 @@
 
 - **Name:** monai-diffusion
 - **Version:** 0.1.0
-- **Python:** >=3.13 (pinned to 3.13 via .python-version)
+- **Python:** 3.13 (pinned via .python-version)
 - **Package manager:** uv (lock file: uv.lock)
-- **Stage:** EDA complete → dataset pipeline design in progress
+- **Stage:** EDA complete → dataset pipeline written → training script written
 - **Working directory:** /home/rahul/MONAI/monai-diffusion
 
 ---
 
-## GOAL / PURPOSE
+## GOAL
 
-2D slice-based diffusion model for brain MRI synthesis using a skull-stripped,
-multi-modal brain MRI dataset (T1, T2-axi, T2-cor, FLAIR).
-**Current decision: train on 3D volumetric subjects only, T1 modality first.**
+Train a **2D slice-based unconditional diffusion model** (DDIM) for brain MRI synthesis.
+Input data: skull-stripped, multi-modal brain MRI NIfTI files.
+Current scope: T1-only, 3D volumetric subjects only, unconditional generation.
 
 ---
 
@@ -28,34 +28,39 @@ multi-modal brain MRI dataset (T1, T2-axi, T2-cor, FLAIR).
 
 ```
 monai-diffusion/
-├── brain_only/            # ~1.4 GB dataset (450 subjects, brain-extracted NIfTI)
-│   ├── <study_uid>/       # 450 subject folders named by unique study UID
+├── brain_only/              # ~1.4 GB dataset (450 subject folders, brain-extracted NIfTI)
+│   ├── <study_uid>/         # Each folder = one subject, named by opaque study UID
 │   │   ├── brain_mask.nii.gz
 │   │   ├── t1_brain.nii.gz
 │   │   ├── t2_axi_brain.nii.gz
 │   │   ├── t2_cor_brain.nii.gz
 │   │   └── flair_brain.nii.gz
-│   └── reports.csv        # Clinical radiology reports (130 subjects)
-├── analysis.ipynb         # EDA notebook (cells 0–8 active)
-├── main.py                # Placeholder entry point
-├── pyproject.toml
-├── .python-version        # "3.13"
-├── uv.lock
-└── .venv/                 # Python 3.13, uv-managed
+│   └── reports.csv          # Free-text radiology reports (study_uid, report, findings, impression)
+├── analysis.ipynb           # EDA notebook — 10 active cells (see section below)
+├── dataset.py               # Dataset pipeline (filter → preprocess → PyTorch Dataset)
+├── train.py                 # DDIM training script
+├── main.py                  # Placeholder only — prints hello
+├── pyproject.toml           # Dependencies
+├── .python-version          # "3.13"
+├── uv.lock                  # Full dependency lock
+└── .venv/                   # Python 3.13, uv-managed virtualenv
 ```
 
 ---
 
 ## DEPENDENCIES (pyproject.toml)
 
-| Package    | Version   | Purpose                           |
-|------------|-----------|-----------------------------------|
-| matplotlib | >=3.10.8  | Visualization / plotting          |
-| nibabel    | >=5.4.2   | NIfTI file I/O                    |
-| numpy      | >=2.4.3   | Numerical computing               |
-| pandas     | >=3.0.1   | Tabular data                      |
+| Package    | Version   | Purpose                                      |
+|------------|-----------|----------------------------------------------|
+| matplotlib | >=3.10.8  | Visualization / plotting                     |
+| monai      | >=1.5.2   | Medical imaging transforms + diffusion model |
+| nibabel    | >=5.4.2   | NIfTI file I/O                               |
+| numpy      | >=2.4.3   | Numerical computing                          |
+| pandas     | >=3.0.1   | Tabular data                                 |
+| einops     | >=0.8.2   | Required by MONAI attention blocks           |
 
-Note: MONAI not yet installed — will be added when dataset/model code begins.
+Note: `einops` was added during training setup — MONAI's `DiffusionModelUNet`
+attention layers require it but it is not listed as a hard MONAI dependency.
 
 ---
 
@@ -63,155 +68,309 @@ Note: MONAI not yet installed — will be added when dataset/model code begins.
 
 ### Overview
 - **450 subjects** total on disk
-- All subjects have T1 + brain mask
-- Modality availability (all 450):
-  - T1:     450 / 450 (100%)
-  - T2-axi: 423 / 450 (94%)
-  - FLAIR:  358 / 450 (80%)
-  - T2-cor: 211 / 450 (47%)
-  - mask:   450 / 450 (100%)
+- All data is skull-stripped (brain-extracted) — no raw head scans
+- Subject IDs are opaque alphanumeric study UIDs (e.g. 2APWTMIH5Z)
+
+### Modality availability (all 450 subjects)
+| Modality | Available | % |
+|----------|-----------|---|
+| T1       | 450 / 450 | 100% |
+| T2-axi   | 423 / 450 | 94% |
+| FLAIR    | 358 / 450 | 80% |
+| T2-cor   | 211 / 450 | 47% |
+| mask     | 450 / 450 | 100% |
 
 ### Modality combination breakdown
-- 200 subjects — T1 + T2-axi + FLAIR + mask
-- 155 subjects — all 5 (T1 + T2-axi + T2-cor + FLAIR + mask)
--  42 subjects — T1 + T2-axi + T2-cor + mask
--  26 subjects — T1 + T2-axi + mask
--  14 subjects — T1 + T2-cor + mask
--  10 subjects — T1 + mask only
--   3 subjects — T1 + FLAIR + mask
+| Combo | Count |
+|-------|-------|
+| T1 + T2-axi + FLAIR + mask | 200 |
+| T1 + T2-axi + T2-cor + FLAIR + mask (all 5) | 155 |
+| T1 + T2-axi + T2-cor + mask | 42 |
+| T1 + T2-axi + mask | 26 |
+| T1 + T2-cor + mask | 14 |
+| T1 + mask only | 10 |
+| T1 + FLAIR + mask | 3 |
 
-### TWO POPULATIONS — identified via voting classifier
+### TWO POPULATIONS — identified via EDA
 
+**Population 1 — Thick-slice 2D clinical (~43% of subjects, 195 subjects)**
+- `dz` = 4.2–7.2mm (thick axial slices, standard clinical protocol)
+- Anisotropy ratio = 5–16 (very anisotropic: in-plane ~0.5–0.9mm, through-plane ~6mm)
+- 20–35 slices per volume
+- ~21 usable slices per subject (low padding, ~12% empty)
+- In-plane shapes: mostly 204×256 or 512×512
+
+**Population 2 — 3D Volumetric (~57% of subjects, ~255 subjects)**
+- `dz` = 0.446–2.0mm (near-isotropic to isotropic)
+- Anisotropy ratio = 0.54–2.05 (isotropic)
+- 120–640 slices per volume
+- ~214 usable slices per subject after 1% fill filter (before cropping)
+- ~43% of slices are empty padding — **must crop before training**
+- In-plane shapes: highly heterogeneous — 512×512, 256×256, 256×512, 175×512, 155×288, etc.
+- Includes "near-isotropic" subjects at 1.0–1.5mm dz that old threshold (dz<1mm) misclassified
+
+**CRITICAL: The two populations have incompatible slice thicknesses and cannot be mixed.**
+
+### How populations are classified — voting classifier
 ```python
 def classify_acquisition(nifti_path):
-    # Votes on 3 signals — 2-of-3 → "thick", else → "3d"
-    thick_slice  = dz > 2.5
-    anisotropy   = dz / ((dx + dy) / 2) > 2.0
-    few_slices   = D < 60
+    # 2-of-3 majority vote
+    thick_slice  = dz > 2.5              # signal 1: slice thickness
+    anisotropic  = dz/mean(dx,dy) > 2.0  # signal 2: anisotropy ratio
+    few_slices   = D < 60                # signal 3: slice count
+    return "thick" if sum([thick_slice, anisotropic, few_slices]) >= 2 else "3d"
 ```
+Why 3 signals: a subject with dz=1.8mm but D=180 slices and anisotropy=1.5
+correctly classifies as 3D even though it is borderline on one signal.
+A simple dz threshold (e.g. dz<1mm) misclassified 7 near-isotropic subjects.
 
-**Population 1 — Thick-slice 2D (~38% of subjects)**
-- dz = 4.8–7.2mm, anisotropy = 5–16
-- 20–35 slices/volume, ~21 usable slices/subject
-- Small in-plane: mostly 204×256 or 512×512
-- Low empty rate: ~12% padding
+### Volume quality filters (applied on top of population classifier)
+```python
+MAX_FILL_MIN  = 0.15   # peak fill across all slices must exceed 15%
+MIN_USABLE_R  = 0.10   # usable_slices / total_slices must exceed 10%
+```
+- `low_peak_fill` catches **partial brains / failed skull-stripping**
+  → `2CO3ODNYCK`: shape (192,256,256), dz=0.977mm, only 22 usable slices,
+    peak fill = 9.8% — brain extraction preserved only a tiny region
+- `low_usable_ratio` catches **oversized FOV with tiny brain window**
+- `empty_volume`: `RFBOX2XT3P` (0 usable, dz=0.469mm) and
+                  `X4DSUZALBB` (0 usable, dz=0.889mm)
 
-**Population 2 — 3D Volumetric (~62% of subjects)**
-- dz = 0.446–2.0mm, anisotropy = 0.54–2.05
-- 120–560 slices/volume, ~209 usable slices/subject (after 1% fill filter)
-- In-plane: 512×512, 256×256, 175×512, 155×288, etc. — highly heterogeneous
-- High empty rate: ~43% average padding → **must crop before use**
-- Includes "near-isotropic" 1.0–1.5mm subjects (correctly classified as 3D by voter)
+### Step 1 filtering results (all 450 subjects)
+| Reason | Count |
+|--------|-------|
+| ok (kept, 3D clean) | **251** |
+| thick_slice | 195 |
+| empty_volume | 2 |
+| low_peak_fill / low_usable_ratio | 2 |
+| **Total dropped** | **199** |
 
-### Key data quality findings
-- **X4DSUZALBB**: fully empty T1 volume (100% empty slices) — must be dropped
-- **IDPGHXRT4I**: 76.7% empty, tiny residual signal — borderline, flagged
-- No corrupt files found otherwise
-- 52 unique (H, W, dx, dy) spatial configurations — resampling required
-- Most common shape: 512×512 @ 0.469mm (largest group)
+### Usable slice inventory (kept subjects, 1% fill threshold)
+| Stat | Value |
+|------|-------|
+| Subjects kept | 251 |
+| Total usable slices | ~54,000–71,000 (1% fill; exact count varies with crop) |
+| Mean / subject | 214 slices |
+| Median / subject | 263 slices |
+| Min / subject | 22 (flagged outlier — 2CO3ODNYCK) |
+| Max / subject | 336 slices |
 
-### 2D Slice Inventory (100-subject sample, 1% fill threshold)
-| Population | Subjects | Total slices | Usable | Empty % |
-|------------|----------|-------------|--------|---------|
-| 3D         | 62       | 23,372      | 12,961 | 42.8%   |
-| Thick      | 38       | 936         | 814    | 12.4%   |
+Smoke test on 3 subjects yielded 850 slices → ~283/subject, consistent with above.
+Extrapolating: **~71,000 usable slices** across 251 subjects at 5% fill threshold.
 
-Extrapolated to all 450 subjects: **~55,000–65,000 usable 3D T1 slices**
+### Spatial heterogeneity
+- **52 unique (H, W, dx, dy) spatial configurations** across all modalities
+- Most common shape: 512×512 @ 0.469mm in-plane (114 volumes)
+- In-plane pixel spacing ranges from 0.391mm to 1.5mm
+- **All volumes must be resampled to a canonical resolution before training**
 
 ---
 
 ## EDA NOTEBOOK — analysis.ipynb
 
-| Cell | Status | Purpose |
-|------|--------|---------|
-| 0    | done   | Sanity check (1+1) |
-| 1    | done   | Modality inventory — all 450 subjects |
-| 2    | done   | 100-subject sample — shape, voxel, anisotropy survey + classify_acquisition |
-| 3    | done   | Visualise shape & resolution distributions (6-panel plot) |
-| 4    | done   | Empty slice rate — 3D vs thick (3-panel plot) |
-| 5    | done   | Visualise top-4 emptiest subjects (slice images + fill profile) |
-| 6    | done   | Thick-slice outlier investigation |
-| 7    | done   | Thick-slice >100 slice investigation → revealed near-isotropic 3rd group |
-| 8    | active | Step 1: filter all 450 subjects → keep 3D, drop thick/empty |
+All cells are independent and runnable top-to-bottom. `df_all` and `df_3d`
+from cell 8 are the canonical subject lists used downstream.
+
+| Cell | Status | Description |
+|------|--------|-------------|
+| 0 | done | Sanity check (`1+1`) |
+| 1 | done | **Modality inventory** — availability counts for all 450 subjects |
+| 2 | done | **100-subject sample survey** — shape, voxel size, anisotropy + `classify_acquisition` definition. Creates `df` with `pop` column. |
+| 3 | done | **Shape & resolution visualisation** — 6-panel: slice thickness histogram, 3D/thick pie, W/H histograms, H×W scatter, depth D histogram |
+| 4 | done | **Empty slice rate** — per-population (3D vs thick): empty %, usable slices boxplot, total-vs-empty scatter. Creates `dfe`. |
+| 5 | done | **Most-empty subject investigation** — top 4 emptiest subjects, slice images + fill-rate profile. Confirmed 3D subjects have bell-curve fill profiles → normal padding. |
+| 6 | done | **Thick-slice outlier investigation** — thick subjects sorted by empty %, top 4 visualised |
+| 7 | done | **Thick-slice >100 slice investigation** — revealed 7 near-isotropic subjects (dz=1.0–1.5mm, 120–256 slices) being misclassified as thick. This led to the voting classifier fix. |
+| 8 | done | **Step 1: Full subject filtering** — runs `classify_acquisition` + quality gates on all 450 subjects. Creates `df_all` (all) and `df_3d` (kept). Prints breakdown table. |
+| 9 | done | **2CO3ODNYCK investigation** — the 3D subject with only 22 usable slices. 12 slice images across the volume + fill-rate profile. Confirmed: brain extraction preserved only a tiny ROI (peak fill 9.8%, usable window z=77–98 out of 256). Decision: drop via `low_peak_fill` gate. |
 
 ---
 
-## PROPOSED DATASET PIPELINE (3D subjects only)
+## DATASET PIPELINE — dataset.py
 
-### Step 1 — Subject filtering (cell 8, COMPLETE)
-- Run `classify_acquisition` on all 450 subjects
-- **Kept: 253 subjects** (3D, usable > 0)
-- **Dropped: 197 subjects**
-  - 195 × thick_slice
-  - 2 × empty_volume: `RFBOX2XT3P` (dz=0.469, 512 slices, 0 usable), `X4DSUZALBB` (dz=0.889, 288 slices, 0 usable)
-- Usable slice stats (1% fill threshold, pre-crop):
-  - Total: **54,147 slices**
-  - Mean: 214 / subject  |  Min: 22  |  Median: 263  |  Max: 336
-- Note: one subject has only 22 usable slices — worth investigating before training
+Full preprocessing pipeline for 2D slice extraction from 3D T1 volumes.
 
-### Step 2 — Per-volume preprocessing
-1. **Crop** to brain extent: first/last slice with fill > 1%, ±3 slice margin
-2. **Resample in-plane** to 1.0mm isotropic (subjects range 0.45–1.2mm in-plane)
-3. **Resize** to 256×256 (center-crop or pad)
-4. **Intensity normalise**: clip at 99.5th percentile within brain mask, then min-max → [0, 1]
-
-### Step 3 — Slice extraction
-- Extract all axial slices from cropped, preprocessed volume
-- Keep slices with fill **> 5%** (stricter than 1% — removes thin edge slices)
-- Expected: ~150–200 usable slices/subject → **~45,000–55,000 total training slices**
-
-### Step 4 — Train / Val / Test split
-- Split at **subject level** (never slice level — prevents leakage)
-- Ratio: **80 / 10 / 10**
-- ~275 subjects → ~220 train / 28 val / 27 test
-- Stratify by anisotropy group (0.5mm vs 1.0mm subjects balanced across splits)
-
-### Step 5 — PyTorch Dataset class
+### Constants (top of file — tune here)
 ```python
-# Returns per __getitem__:
-{
-    "slice":      torch.Tensor  # (1, 256, 256) float32 in [0, 1]
-    "subject_id": str,
-    "slice_idx":  int,
-}
-# Augmentation: random horizontal flip only (brain is roughly symmetric)
-# Loading: lazy (load NIfTI per subject, index into slices)
+TARGET_SIZE    = 256     # output in-plane size (pixels)
+TARGET_SPACING = 1.0     # target in-plane resolution (mm)
+MIN_SLICE_FILL = 0.05    # slice must have >5% non-zero voxels
+MAX_FILL_MIN   = 0.15    # volume: peak fill must exceed 15%
+MIN_USABLE_R   = 0.10    # volume: usable/total ratio must exceed 10%
+CROP_MARGIN    = 3       # extra slices above/below brain extent
+TRAIN_FRAC     = 0.80
+VAL_FRAC       = 0.10
+```
+
+### Functions
+```
+classify_acquisition(path)     → "3d" or "thick" (2-of-3 voter)
+get_subject_list(base_dir)     → list of Path to t1_brain.nii.gz (251 subjects)
+make_splits(paths, seed)       → train_paths, val_paths, test_paths (80/10/10)
+_crop_to_brain(data, margin)   → crops volume z-axis to brain extent ± CROP_MARGIN
+_build_transforms(pixdim_z)    → MONAI Compose: Spacing (in-plane) + ResizeWithPadOrCrop
+_normalise_slice(slc)          → clip [0.5th, 99.5th] percentile, min-max → [0,1]
+preprocess_volume(path)        → list of (256,256) float32 arrays for one subject
+build_datasets(base_dir, seed) → train_ds, val_ds, test_ds (BrainSliceDataset)
+```
+
+### BrainSliceDataset (PyTorch Dataset)
+```python
+item = dataset[i]
+# item["slice"]      → torch.Tensor  (1, 256, 256) float32 in [0, 1]
+# item["subject_id"] → str
+# item["slice_idx"]  → int
+
+# Augmentation (training only): random horizontal flip
+# Loading strategy: eager (preprocesses all subjects at init, caches in RAM)
+```
+
+### Per-volume preprocessing steps (in order)
+1. Load NIfTI → float32 numpy array (H, W, D)
+2. Crop z-axis to brain extent (first/last slice with fill >1%) ± 3 slice margin
+3. MONAI `Spacing` — resample in-plane to 1.0×1.0mm (bilinear)
+4. MONAI `ResizeWithPadOrCrop` — pad or crop to 256×256 in-plane, keep D
+5. Extract each axial slice, discard if fill <5%
+6. Per-slice intensity normalisation: clip at 99.5th percentile (non-zero voxels), min-max → [0,1]
+
+### Train / Val / Test split
+- Subject-level split — **never slice-level** (prevents data leakage)
+- Random shuffle with fixed seed (42) for reproducibility
+- Ratio: 251 subjects → ~201 train / 25 val / 25 test
+
+### Smoke test result (verified)
+```
+Subjects kept:  251
+3 subjects → 850 slices (~283/subject)
+item["slice"].shape:  torch.Size([1, 256, 256])
+item["slice"].dtype:  torch.float32
+value range:          [0.000, 1.000]  ✓
 ```
 
 ---
 
-## ENVIRONMENT & TOOLING
+## TRAINING SCRIPT — train.py
 
-- **Virtual env:** .venv/ (Python 3.13, managed by uv)
-- **IDE:** VSCode with Jupyter notebook MCP extension
-- **Git:** Initialized, no commits, main branch, no remote
-- **Jupyter:** Started manually via `source .venv/bin/activate && jupyter server --no-browser --port=8888`
+DDIM unconditional diffusion model using MONAI's `DiffusionModelUNet`.
+
+### Model architecture
+```python
+DiffusionModelUNet(
+    spatial_dims     = 2,
+    in_channels      = 1,
+    out_channels     = 1,
+    channels         = (128, 256, 256, 512),   # 4 resolution levels
+    attention_levels = (False, False, True, True),  # attention at 64px, 32px
+    num_res_blocks   = (2, 2, 2, 2),
+    num_head_channels= 32,
+    norm_num_groups  = 32,
+)
+# Parameters: 74,046,721  (~74M)
+# Input/Output: (B, 1, 256, 256)
+```
+
+### Scheduler
+```python
+DDIMScheduler(num_train_timesteps=1000)
+# Training: standard DDPM noise prediction (MSE loss)
+# Inference: DDIM with 50 steps (configurable via --ddim_steps)
+```
+
+### Training loop
+- Loss: MSE between predicted noise and actual noise (standard DDPM objective)
+- Optimizer: AdamW, lr=1e-4
+- Mixed precision: AMP (autocast + GradScaler), enabled on CUDA
+- Gradient clipping: max norm = 1.0
+- Validation: every 5 epochs (configurable)
+- Checkpointing: every 10 epochs + on new best val loss → `checkpoints/epoch_XXXX.pt`
+- Auto-resume: loads latest checkpoint from `checkpoints/` if present
+
+### CLI args
+```bash
+python train.py \
+  --epochs 100 \
+  --batch_size 16 \
+  --lr 1e-4 \
+  --num_timesteps 1000 \
+  --ddim_steps 50 \
+  --seed 42 \
+  --num_workers 4 \
+  --save_dir checkpoints \
+  --save_every 10 \
+  --val_every 5
+```
+
+### Checkpoint format
+```python
+{
+    "epoch":     int,
+    "model":     state_dict,
+    "optimizer": state_dict,
+    "val_loss":  float,
+}
+```
+
+### Inference (sampling)
+```python
+samples = sample_images(model, scheduler, device, n_samples=4, ddim_steps=50)
+# Returns: (4, 1, 256, 256) float32 in [0, 1]
+```
+
+---
+
+## KEY ARCHITECTURAL DECISIONS & RATIONALE
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Population | 3D only | Thick-slice has <25 slices/subject, incompatible dz |
+| Modality | T1 only (first pass) | T1 available for all 251 kept subjects |
+| Target size | 256×256 | Standard for diffusion models; fits most shapes |
+| Target spacing | 1.0mm in-plane | Normalises 0.45–1.2mm spread; natural physical unit |
+| Fill threshold | >5% (training) | Cleaner than 1% — removes thin edge slices with barely any brain |
+| Normalisation | 99.5th percentile clip + min-max | Robust to intensity outliers |
+| Split | 80/10/10 subject-level | Subject-level prevents slice leakage |
+| Crop margin | ±3 slices | Preserves brain boundary context |
+| Augmentation | Horizontal flip only | Brain is roughly L-R symmetric |
+| Loss | MSE on noise (epsilon) | Standard DDPM/DDIM training objective |
 
 ---
 
 ## KNOWN CONSTRAINTS / GOTCHAS
 
-1. **Two populations** must not be mixed — thick-slice (4–7mm) and 3D (0.4–2mm) are incompatible slice thicknesses.
-2. **3D volumes need cropping** — ~43% of slices are empty padding.
-3. **Heterogeneous shapes** — 52 unique spatial configs, must resample to canonical 256×256 @ 1mm.
-4. **Missing modalities** — not all subjects have all modalities; loaders must handle absent files.
-5. **Empty volume** — X4DSUZALBB has 0 usable T1 slices, must be dropped.
-6. **MONAI not installed yet.**
-7. **No train/val/test split defined yet** — Step 4 above is the plan.
-8. **No model code exists yet.**
+1. **Two populations must not be mixed** — dz 4–7mm vs 0.4–2mm are physically incompatible.
+2. **3D volumes need z-cropping** — ~43% of slices are empty padding.
+3. **52 unique spatial configs** — resampling to canonical 1mm/256px is mandatory.
+4. **Dataset is loaded eagerly** — `BrainSliceDataset._build_index()` preprocesses all subjects at init. With 251 subjects this takes ~5–10 minutes and uses significant RAM. Consider lazy loading if RAM is constrained.
+5. **`einops` required** — MONAI's attention blocks need it; it is installed in `.venv` but not a hard MONAI dependency (easy to miss in a fresh env).
+6. **GPU strongly recommended** — 74M parameter model, 71K slices. CPU training will be extremely slow.
+7. **No model code for conditional generation yet** — current setup is unconditional.
+8. **reports.csv exists** — could enable text-conditioned generation in a future phase.
 
 ---
 
-## LIKELY NEXT STEPS
+## ENVIRONMENT & TOOLING
 
-1. ✅ Modality inventory (cell 1)
-2. ✅ Shape/resolution survey (cells 2–3)
-3. ✅ Empty slice analysis (cells 4–7)
-4. ✅ Population classifier (voting, cell 2)
-5. ✅ Step 1: filter all subjects → 253 kept, 197 dropped (cell 8)
-6. ⬜ Step 2: implement per-volume preprocessing (crop, resample, resize, normalise)
-7. ⬜ Step 3: slice extraction with 5% fill threshold
-8. ⬜ Step 4: subject-level train/val/test split
-9. ⬜ Step 5: PyTorch Dataset class
-10. ⬜ Add MONAI as dependency
-11. ⬜ Implement 2D diffusion model (U-Net denoiser, DDPM/DDIM)
+- **Virtual env:** `.venv/` (Python 3.13, managed by uv)
+- **IDE:** VSCode with Jupyter notebook MCP extension
+- **Jupyter:** Start with `source .venv/bin/activate && jupyter server --no-browser --port=8888`
+- **Git:** Initialized, no commits yet, main branch, no remote
+
+---
+
+## PROGRESS TRACKER
+
+| Step | Status | Notes |
+|------|--------|-------|
+| Modality inventory (cell 1) | ✅ done | 450 subjects, T1+mask universal |
+| Shape/resolution survey (cells 2–3) | ✅ done | 52 unique configs, two populations |
+| Empty slice analysis (cells 4–7) | ✅ done | 3D: 43% empty; thick: 12% empty |
+| Population voting classifier | ✅ done | 3 signals, 2-of-3 vote |
+| Subject filtering — Step 1 (cell 8) | ✅ done | 251 kept, 199 dropped |
+| Outlier investigation (cell 9) | ✅ done | 2CO3ODNYCK dropped via peak fill gate |
+| Dataset pipeline (dataset.py) | ✅ done | Smoke tested — 850 slices / 3 subjects |
+| Training script (train.py) | ✅ done | Forward pass verified, 74M params |
+| First training run | ⬜ pending | Need GPU |
+| Sample visualisation during training | ⬜ pending | |
+| Evaluate generated samples | ⬜ pending | FID / visual inspection |
+| Conditional generation (text / modality) | ⬜ future | reports.csv available |
+| Multi-modal extension (T2, FLAIR) | ⬜ future | |
