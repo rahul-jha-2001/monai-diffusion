@@ -1,0 +1,67 @@
+2026-03-30 14:09:20.342  INFO      Log file: /workspace/monai-diffusion/logs/infer_20260330_140920.log
+2026-03-30 14:09:20.343  INFO      ============================================================
+2026-03-30 14:09:20.343  INFO      Inference started  mode=sdedit
+2026-03-30 14:09:20.343  INFO      Args: {'mode': 'sdedit', 'ckpt': 'checkpoints/epoch_0001.pt', 'ddim_steps': 50, 'out': 'counterfactual.png', 'log_dir': 'logs', 'n_samples': 4, 'nifti': 'brain_only/L6UAU3JQ6T/t1_brain.nii.gz', 'slice_idx': None, 't_start': 500}
+2026-03-30 14:09:20.499  INFO      Device: cuda
+2026-03-30 14:09:20.535  DEBUG     CUDA device: NVIDIA GeForce RTX 5090
+2026-03-30 14:09:20.536  DEBUG     CUDA memory: 0.0MB allocated  0.0MB reserved
+2026-03-30 14:09:20.537  INFO      Loading checkpoint: checkpoints/epoch_0001.pt
+2026-03-30 14:09:20.537  DEBUG     [START] torch.load checkpoint
+2026-03-30 14:09:21.042  DEBUG     [END]   torch.load checkpoint  ->  0.505s
+2026-03-30 14:09:21.043  DEBUG     Checkpoint keys: ['epoch', 'model', 'optimizer', 'val_loss']
+2026-03-30 14:09:21.043  INFO      Checkpoint  epoch=1  val_loss=0.004903
+2026-03-30 14:09:21.044  DEBUG     [START] build_model + load_state_dict
+2026-03-30 14:09:21.044  DEBUG     Building DiffusionModelUNet: spatial_dims=2, channels=(128,256,256,512)
+2026-03-30 14:09:21.873  DEBUG     Model built  —  parameters: 74,046,721
+2026-03-30 14:09:22.005  DEBUG     [END]   build_model + load_state_dict  ->  0.961s
+2026-03-30 14:09:22.012  INFO      Model loaded and set to eval mode
+2026-03-30 14:09:22.015  DEBUG     DDIMScheduler initialised  num_train_timesteps=1000
+2026-03-30 14:09:22.019  DEBUG     NIfTI header shape (pre-crop): (175, 256, 256)
+2026-03-30 14:09:22.019  INFO      No --slice_idx given, defaulting to middle: 128/256 (pre-crop)
+2026-03-30 14:09:22.020  DEBUG     [START] load_slice total
+2026-03-30 14:09:22.020  INFO      Loading NIfTI: brain_only/L6UAU3JQ6T/t1_brain.nii.gz
+2026-03-30 14:09:22.020  DEBUG     [START] nib.load + get_fdata
+2026-03-30 14:09:22.064  DEBUG     [END]   nib.load + get_fdata  ->  0.044s
+2026-03-30 14:09:22.068  DEBUG     Volume loaded: shape=(175, 256, 256)  dtype=float32  pixdim=(1.00, 0.94, 0.94)mm  value_range=[0.00, 23650.89]
+2026-03-30 14:09:22.068  DEBUG     [START] brain crop
+2026-03-30 14:09:22.087  DEBUG     Brain crop: volume shape=(175, 256, 256)  usable_slices=133  fill_range=[0.000, 0.383]
+2026-03-30 14:09:22.087  DEBUG     Brain crop: z_start=88  z_end=227  (margin=3)
+2026-03-30 14:09:22.088  DEBUG     [END]   brain crop  ->  0.020s
+2026-03-30 14:09:22.088  INFO      After brain crop: 139 slices remain
+2026-03-30 14:09:22.088  INFO      Building MONAI transform pipeline (target=256px @ 1.0mm)
+2026-03-30 14:09:22.090  DEBUG     [START] MONAI Spacing + ResizeWithPadOrCrop
+2026-03-30 14:09:22.335  DEBUG     [END]   MONAI Spacing + ResizeWithPadOrCrop  ->  0.245s
+2026-03-30 14:09:22.336  DEBUG     After MONAI transforms: vol.shape=(256, 256, 148)  dtype=float32
+2026-03-30 14:09:22.337  DEBUG     Extracted slice 128: shape=(256, 256)  fill=0.085  value_range=[0.00, 14606.71]
+2026-03-30 14:09:22.338  DEBUG     [START] normalise slice
+2026-03-30 14:09:22.339  DEBUG     Normalise: nonzero_voxels=5567  p0.5=0.00  p99.5=14079.84  raw_range=[0.00, 14606.71]
+2026-03-30 14:09:22.340  DEBUG     Normalise: output range=[0.0000, 1.0000]
+2026-03-30 14:09:22.340  DEBUG     [END]   normalise slice  ->  0.002s
+2026-03-30 14:09:22.342  INFO      Slice ready: shape=(1, 1, 256, 256)  dtype=torch.float32  value_range=[0.0000, 1.0000]
+2026-03-30 14:09:22.342  DEBUG     [END]   load_slice total  ->  0.323s
+2026-03-30 14:09:22.343  DEBUG     CUDA memory after load_slice: 300.3MB
+2026-03-30 14:09:22.343  DEBUG     [START] sdedit total
+2026-03-30 14:09:22.343  INFO      SDEdit: t_start=500  ddim_steps=50
+2026-03-30 14:09:22.344  DEBUG     Input image: shape=(1, 1, 256, 256)  dtype=torch.float32  value_range=[0.0000, 1.0000]
+2026-03-30 14:09:22.345  DEBUG     [START] scheduler.set_timesteps
+2026-03-30 14:09:22.345  DEBUG     [END]   scheduler.set_timesteps  ->  0.000s
+2026-03-30 14:09:22.345  DEBUG     DDIM timesteps (50): [980, 960, 940, 920, 900] ... [80, 60, 40, 20, 0]
+2026-03-30 14:09:22.346  INFO      t_start=500 -> nearest DDIM step=500  (idx=24, will denoise 26/50 steps)
+2026-03-30 14:09:22.348  DEBUG     [START] scheduler.add_noise (forward diffusion)
+2026-03-30 14:09:22.376  DEBUG     [END]   scheduler.add_noise (forward diffusion)  ->  0.029s
+2026-03-30 14:09:22.389  DEBUG     After add_noise: x_range=[-4.350, 4.618]  noise_range=[-4.530, 4.809]
+2026-03-30 14:09:22.390  INFO      Reverse diffusion: 26 steps from t=500 -> 0
+2026-03-30 14:09:22.777  DEBUG       step [  1/26]  t= 500  x_range=[-4.314, 4.575]  step_time=386.5ms
+2026-03-30 14:09:23.114  DEBUG       step [ 11/26]  t= 300  x_range=[-3.430, 3.601]  step_time=33.6ms
+2026-03-30 14:09:23.452  DEBUG       step [ 21/26]  t= 100  x_range=[-1.291, 1.698]  step_time=33.7ms
+2026-03-30 14:09:23.621  DEBUG       step [ 26/26]  t=   0  x_range=[-0.121, 1.000]  step_time=33.9ms
+2026-03-30 14:09:23.622  INFO      SDEdit denoising complete: 1.23s total  (47.4ms/step avg)
+2026-03-30 14:09:23.623  DEBUG     [END]   sdedit total  ->  1.280s
+2026-03-30 14:09:23.624  DEBUG     CUDA memory after sdedit: 334.1MB
+2026-03-30 14:09:23.624  DEBUG     Saving SDEdit comparison: path=counterfactual.png
+2026-03-30 14:09:23.625  DEBUG     Comparison stats — orig=[0.0000,1.0000]  cf=[0.0000,1.0000]  diff_mean=0.0214  diff_max=0.8466
+2026-03-30 14:09:23.678  DEBUG     [START] plt.savefig counterfactual.png
+2026-03-30 14:09:23.955  DEBUG     [END]   plt.savefig counterfactual.png  ->  0.277s
+2026-03-30 14:09:23.955  INFO      Saved SDEdit comparison -> counterfactual.png
+2026-03-30 14:09:23.956  INFO      Inference complete  total_time=3.61s
+2026-03-30 14:09:23.956  INFO      ============================================================
