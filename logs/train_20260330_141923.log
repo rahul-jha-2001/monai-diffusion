@@ -1,0 +1,10 @@
+2026-03-30 14:19:23.980  INFO      Log file: /workspace/monai-diffusion/logs/train_20260330_141923.log
+2026-03-30 14:19:23.980  INFO      ======================================================================
+2026-03-30 14:19:23.981  INFO      Training started
+2026-03-30 14:19:23.981  INFO      Args: {'epochs': 100, 'batch_size': 16, 'lr': 0.0001, 'num_timesteps': 1000, 'ddim_steps': 50, 'seed': 42, 'num_workers': 4, 'save_dir': 'checkpoints', 'save_every': 10, 'val_every': 5, 'log_dir': 'logs', 'log_every': 10}
+2026-03-30 14:19:24.135  INFO      Device: cuda
+2026-03-30 14:19:24.161  DEBUG     CUDA device: NVIDIA GeForce RTX 5090
+2026-03-30 14:19:24.162  DEBUG     CUDA total memory: 33.7GB
+2026-03-30 14:19:24.164  DEBUG     Seeds set: torch=42  numpy=42
+2026-03-30 14:19:24.164  INFO      Building datasets...
+2026-03-30 14:19:24.165  DEBUG     [START] build_datasets
