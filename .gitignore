@@ -8,4 +8,4 @@ wheels/
 
 # Virtual environments
 .venv
-*.nii.gz
+*.nii.gzcheckpoints/
